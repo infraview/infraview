@@ -1,7 +1,7 @@
 from neo4jrestclient import client
 from neo4jrestclient.client import GraphDatabase
 
-q = 'MATCH (u1)-[r:sends]->(u2) RETURN u1,r,u2'
+q = 'MATCH (u1)-[r]->(u2) RETURN u1,r,u2'
 
 db = GraphDatabase("http://localhost:7474", username="neo4j", password="admin")
 results = db.query(q, returns=(client.Node, client.Relationship, client.Node))
