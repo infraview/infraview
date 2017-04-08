@@ -47,7 +47,7 @@ from neo4jrestclient.client import GraphDatabase
 
 # TODO: add argparse
 DEFAULT_HOSTS_FILE = './hosts'
-DEFAULT_TIER_LEVELS = '(.*)\.(.*)\.east.netview.tech'
+DEFAULT_TIER_LEVELS = '(.*)\.(.*)\.east\.netview\.tech'
 
 hosts = {}
 
@@ -238,6 +238,10 @@ def get_substr(prefix_list, prefix):
     if not prefix_list:
         return prefix
 
+    if not saved_list:
+        print 'ERR. Tier regex problem.'
+        sys.exit(1)
+
     done = False
     while not done:
         for item in saved_list:
@@ -292,6 +296,10 @@ def main():
     # Prepair list of hosts for fabric
     env.hosts = hosts.keys()
 
+    if len(env.hosts) < 2:
+        print 'ERR. You need at least 2 hosts.'
+        sys.exit(1)
+
     # Prepair list of hostname prefixes
     hosts_prefix = []
     for host in hosts.keys():
@@ -299,7 +307,7 @@ def main():
 
         # Match a different regex than default
         if not m:
-            m = re.match('(.*)\.(.*)\.west.netview.tech', host)
+            m = re.match('(.*)\.(.*)\.west\.netview\.tech', host)
 
         prefix = m.group(1)
         hosts_prefix.append(prefix)
