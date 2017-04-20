@@ -1,0 +1,33 @@
+{
+  "name": "infraview",
+  "version": "1.0.0",
+  "description": "Infrastructure visualization tool",
+  "main": "app.js",
+  "dependencies": {
+    "aws-sdk": "^2.40.0",
+    "bluebird": "^3.5.0",
+    "express": "^4.15.2",
+    "mongoose": "^4.9.3",
+    "request": "^2.81.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "run": "node app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mariuscoto/infraview.git"
+  },
+  "keywords": [
+    "infrastructure",
+    "monitoring",
+    "visualization"
+  ],
+  "author": "Marius Cotofana (marius.coto@gmail.com)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mariuscoto/infraview/issues"
+  },
+  "homepage": "https://github.com/mariuscoto/infraview#readme"
+}
