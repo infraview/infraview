@@ -16,8 +16,11 @@ var Schema = mongoose.Schema;
 var Node = mongoose.model('InfraNode', new Schema({
   id: { type: String, required: true },
   name: { type: String, required: true },
+  service: { type: String },
   ip: { type: String },
   private_ip: { type: String },
+  region: { type: String },
+  zone: { type: String },
   connects_to: { type: [] },
   connections: { type: [] },
   connectionDetails: { type: String }
@@ -52,19 +55,29 @@ ec2.describeInstances(function (err, data) {
     var nodes = [];
     data.Reservations.forEach(function(res) {
       res.Instances.forEach(function(ins) {
+
         if (ins.State.Name == 'running') {
           var InstanceName = null;
+          var ServiceName = null;
           ins.Tags.forEach(function(tag) {
             if (tag.Key === 'Name') {
               InstanceName = tag.Value;
             }
+            if (tag.Key === 'Service') {
+              ServiceName = tag.Value;
+            }
           });
+
+          var AvailabilityZone = ins.Placement.AvailabilityZone;
 
           Node.update({id: ins.InstanceId}, {
             id: ins.InstanceId,
             name: InstanceName || ins.InstanceId,
+            service: ServiceName,
             ip: ins.PublicIpAddress,
-            private_ip: ins.PrivateIpAddress
+            private_ip: ins.PrivateIpAddress,
+            region: AvailabilityZone.substring(0, AvailabilityZone.length-1),
+            zone: AvailabilityZone
           }, {upsert: true}).exec(function (err) {
             if (err) {
               log.error('[ERR] Failed to add node: ' + err)
