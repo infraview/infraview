@@ -5,6 +5,7 @@ var mongoose = require('mongoose');
 var request = require('request');
 
 var app = express();
+var log = require('./logging')();
 
 
 mongoose.Promise = require('bluebird');
@@ -46,7 +47,7 @@ aws.config.update({
 var ec2 = new aws.EC2();
 ec2.describeInstances(function (err, data) {
   if (err) {
-    console.log(err, err.stack);
+    log.error(err, err.stack);
   } else {
     var nodes = [];
     data.Reservations.forEach(function(res) {
@@ -66,7 +67,7 @@ ec2.describeInstances(function (err, data) {
             private_ip: ins.PrivateIpAddress
           }, {upsert: true}).exec(function (err) {
             if (err) {
-              console.log('[ERR] Failed to add node: ' + err)
+              log.error('[ERR] Failed to add node: ' + err)
             }
           });
         }
@@ -93,14 +94,14 @@ app.get('/refresh', function (req, res) {
             connectionDetails: err
           }).exec(function (err) {
             if (err) {
-              console.log('[ERR] Failed to update node connection details: ' + err);
+              log.error('[ERR] Failed to update node connection details: ' + err);
             }
           });
 
         } else {
-          //console.log('error:', error); // Print the error if one occurred
-          //console.log('statusCode:', response && response.statusCode); // Print the response status code if a response was received
-          //console.log('body:', body); // Print the HTML for the Google homepage.
+          //log.error('error:', error); // Print the error if one occurred
+          //log.error('statusCode:', response && response.statusCode); // Print the response status code if a response was received
+          //log.error('body:', body); // Print the HTML for the Google homepage.
 
           var conns = [];
           // Build list of new connections for node
@@ -115,7 +116,7 @@ app.get('/refresh', function (req, res) {
           // Save all new connections at once
           Conn.insertMany(conns, function(err, docs) {
             if (err) {
-              console.log('[ERR] Failed to save connections: ' + err);
+              log.error('[ERR] Failed to save connections: ' + err);
             } else {
               // Save connection IDs
               var conn_ids = [];
@@ -128,7 +129,7 @@ app.get('/refresh', function (req, res) {
                 connections: conn_ids
               }).exec(function (err) {
                 if (err) {
-                  console.log('[ERR] Failed to save node connection: ' + err);
+                  log.error('[ERR] Failed to save node connection: ' + err);
                 }
               });
             }
@@ -144,17 +145,17 @@ app.get('/refresh', function (req, res) {
 app.get('/nodes', function (req, res) {
   Conn.find().exec(function (err, conns) {
     if (err) {
-      console.log('[ERR] Failed to save node connection: ' + err);
+      log.error('[ERR] Failed to save node connection: ' + err);
     } else {
       conns.forEach(function (conn) {
         Node.findOne({'private_ip': conn.destination.split(':')[0]}).exec(function (err, node) {
           if (err) {
-            console.log('[ERR] Failed to get destination node: ' + err);
+            log.error('[ERR] Failed to get destination node: ' + err);
           }
           if (node) {
             Node.update({'_id': conn.node}, {$addToSet: {'connects_to': node._id}}).exec(function (err) {
               if (err) {
-                console.log('[ERR] Failed to push connected node: ' + err);
+                log.error('[ERR] Failed to push connected node: ' + err);
               }
             });
           }
@@ -167,6 +168,7 @@ app.get('/nodes', function (req, res) {
 });
 
 app.get('/graph', function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
   Node.aggregate([{$match: {}}, {
     $graphLookup: {
@@ -179,11 +181,12 @@ app.get('/graph', function (req, res) {
     }
   }]).exec(function (err, graph) {
     if (err) {
-      console.log('[ERR] Failed to get destination node: ' + err);
+      log.error('[ERR] Failed to get destination node: ' + err);
     }
-    console.log(graph);
+    console.log(viz);
 
     var viz = {
+      serverUpdateTime: Date.now(),
       connections: [{
         target: 'us-east-1',
         metrics: { normal: 50000 },
@@ -198,7 +201,8 @@ app.get('/graph', function (req, res) {
         renderer: 'region',
         nodes: [],
         class: 'normal',
-        metadata: {}
+        metadata: {},
+        updated: Date.now()
       }, {
         displayName: 'us-east-1',
         name: 'us-east-1',
@@ -206,7 +210,8 @@ app.get('/graph', function (req, res) {
         renderer: 'region',
         nodes: [],
         class: 'normal',
-        metadata: {}
+        metadata: {},
+        updated: Date.now()
       }],
       renderer: 'global',
       name: 'edge'
@@ -223,7 +228,8 @@ app.get('/graph', function (req, res) {
         maxVolume: 96035.538,
         nodes: [],
         class: 'normal',
-        metadata: {}
+        metadata: {},
+        updated: Date.now()
       });
       // Add us-east-1 connections
       node.graph.forEach(function (conn) {
@@ -247,5 +253,5 @@ app.get('/graph', function (req, res) {
 });
 
 app.listen(3000, function () {
-  console.log('Example app listening on port 3000!');
+  log.info('Infraview backend listening on port 3000: http://localhost:3000');
 });
