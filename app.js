@@ -196,7 +196,6 @@ app.get('/graph', function (req, res) {
     if (err) {
       log.error('[ERR] Failed to get destination node: ' + err);
     }
-    console.log(viz);
 
     var viz = {
       serverUpdateTime: Date.now(),
@@ -241,7 +240,10 @@ app.get('/graph', function (req, res) {
         maxVolume: 96035.538,
         nodes: [],
         class: 'normal',
-        metadata: {},
+        metadata: {
+          inbound: [],
+          outbound: []
+        },
         updated: Date.now()
       });
       // Add us-east-1 connections
