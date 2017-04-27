@@ -1,7 +1,7 @@
 var mongoose = require('mongoose');
 var ObjectId = mongoose.Schema.Types.ObjectId;
 
-module.exports = mongoose.model('InfraNode', new mongoose.Schema({
+module.exports = mongoose.model('Node', new mongoose.Schema({
   'id': {
     type: String,
     required: true

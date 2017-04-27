@@ -1,7 +1,7 @@
 var mongoose = require('mongoose')
 var ObjectId = mongoose.Schema.Types.ObjectId
 
-module.exports = mongoose.model('InfraConn', new mongoose.Schema({
+module.exports = mongoose.model('Connection', new mongoose.Schema({
   'node': {
     type: ObjectId,
     required: true
@@ -18,7 +18,15 @@ module.exports = mongoose.model('InfraConn', new mongoose.Schema({
     type: String,
     required: true
   },
+  'source_port': {
+    type: String,
+    required: true
+  },
   'destination': {
+    type: String,
+    required: true
+  },
+  'destination_port': {
     type: String,
     required: true
   }

@@ -92,6 +92,32 @@ app.get('/nodes', function (req, res) {
   });
 });
 
+app.get('/connections', function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  Node.find({$or: [{name: req.query.node}, {service: req.query.node}]}).select({ 'private_ip': 1, 'ip': 1}).exec(function (err, nodes) {
+    var all_ips = [];
+    nodes.forEach(function(node) {
+      all_ips.push(node.ip);
+      all_ips.push(node.private_ip);
+    });
+
+    Conn.find({$or: [{source: {$in: all_ips}}, {destination: {$in: all_ips}}]}).exec(function (err, conns) {
+      var response = { inbound: [], outbound: [] };
+
+      conns.forEach(function(conn) {
+        if (all_ips.indexOf(conn.source) > -1) {
+          response.outbound.push(conn);
+        } else {
+          response.inbound.push(conn);
+        }
+      });
+
+      res.send(response);
+    });
+  });
+});
+
 app.get('/refresh', function (req, res) {
   Node.find({type: 'instance'}).exec(function (err, nodes) {
     nodes.forEach(function (node) {
@@ -119,8 +145,10 @@ app.get('/refresh', function (req, res) {
               'node': node._id,
               'service': node.service_id,
               'timestamp': conn.t,
-              'source': conn.s,
-              'destination': conn.d
+              'source': conn.s.split(':')[0],
+              'source_port': conn.s.split(':')[1],
+              'destination': conn.d.split(':')[0],
+              'destination_port': conn.d.split(':')[1]
             });
           });
           // Save all new connections at once
@@ -158,7 +186,7 @@ app.get('/bind', function (req, res) {
       log.error('[ERR] Failed to get connections: ' + err);
     } else {
       conns.forEach(function (conn) {
-        Node.findOne({'private_ip': conn.destination.split(':')[0]}).exec(function (err, node) {
+        Node.findOne({'private_ip': conn.destination}).exec(function (err, node) {
           if (err) {
             log.error('[ERR] Failed to get destination node: ' + err);
           }
@@ -222,7 +250,7 @@ app.get('/graph', function (req, res) {
   // Append service nodes
   Node.aggregate([{$match: {type: 'service'}}, {
     $graphLookup: {
-      from: 'infranodes', // Use the customers collection
+      from: 'nodes', // Use the customers collection
       startWith: '$connects_to', // Start looking at the document's `friends` property
       connectFromField: 'connects_to', // A link in the graph is represented by the friends property...
       connectToField: '_id', // ... pointing to another customer's _id property
@@ -268,7 +296,7 @@ app.get('/graph', function (req, res) {
     // Append instance nodes
     Node.aggregate([{$match: {type: 'instance'}}, {
       $graphLookup: {
-        from: 'infranodes', // Use the customers collection
+        from: 'nodes', // Use the customers collection
         startWith: '$connects_to', // Start looking at the document's `friends` property
         connectFromField: 'connects_to', // A link in the graph is represented by the friends property...
         connectToField: '_id', // ... pointing to another customer's _id property
