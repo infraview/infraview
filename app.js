@@ -15,8 +15,10 @@ mongoose.connect('mongodb://localhost/infraview');
 var Schema = mongoose.Schema;
 var Node = mongoose.model('InfraNode', new Schema({
   id: { type: String, required: true },
-  name: { type: String, required: true },
+  type: { type: String, required: true },
+  name: { type: String },
   service: { type: String },
+  service_id: { type: Schema.ObjectId },
   ip: { type: String },
   private_ip: { type: String },
   region: { type: String },
@@ -27,6 +29,7 @@ var Node = mongoose.model('InfraNode', new Schema({
 }));
 var Conn = mongoose.model('InfraConn', new Schema({
   node: { type: Schema.ObjectId, required: true },
+  service: { type: Schema.ObjectId, required: true },
   timestamp: { type: String, required: true },
   source: { type: String, required: true },
   destination: { type: String, required: true }
@@ -42,11 +45,6 @@ aws.config.update({
 });
 
 
-// function sendEmail() {
-//   email.send(to, headers, body);
-//   setTimeout(sendEmail, 10*1000);
-// }
-// setTimeout(sendEmail, 10*1000);
 var ec2 = new aws.EC2();
 ec2.describeInstances(function (err, data) {
   if (err) {
@@ -70,17 +68,32 @@ ec2.describeInstances(function (err, data) {
 
           var AvailabilityZone = ins.Placement.AvailabilityZone;
 
-          Node.update({id: ins.InstanceId}, {
-            id: ins.InstanceId,
-            name: InstanceName || ins.InstanceId,
-            service: ServiceName,
-            ip: ins.PublicIpAddress,
-            private_ip: ins.PrivateIpAddress,
-            region: AvailabilityZone.substring(0, AvailabilityZone.length-1),
-            zone: AvailabilityZone
-          }, {upsert: true}).exec(function (err) {
+          // Create or update service node
+          Node.findOneAndUpdate({id: ServiceName}, {
+            id: ServiceName,
+            name: ServiceName,
+            type: 'service',
+          }, {upsert: true, new: true}, function (err, service) {
             if (err) {
-              log.error('[ERR] Failed to add node: ' + err)
+              log.error('[ERR] Failed to add service node: ' + err)
+            } else {
+              // Create or update instance node
+              Node.update({id: ins.InstanceId}, {
+                id: ins.InstanceId,
+                name: InstanceName || ins.InstanceId,
+                type: 'instance',
+                service: ServiceName,
+                service_id: service._id,
+                ip: ins.PublicIpAddress,
+                private_ip: ins.PrivateIpAddress,
+                region: AvailabilityZone.substring(0, AvailabilityZone.length-1),
+                zone: AvailabilityZone
+              }, {upsert: true}).exec(function (err) {
+                if (err) {
+                  log.error('[ERR] Failed to add instance node: ' + err)
+                }
+              });
+
             }
           });
         }
@@ -91,13 +104,17 @@ ec2.describeInstances(function (err, data) {
 
 
 app.get('/', function (req, res) {
+  res.redirect('/nodes');
+});
+
+app.get('/nodes', function (req, res) {
   Node.find().exec(function (err, nodes) {
     res.send(nodes);
   });
 });
 
 app.get('/refresh', function (req, res) {
-  Node.find().exec(function (err, nodes) {
+  Node.find({type: 'instance'}).exec(function (err, nodes) {
     nodes.forEach(function (node) {
 
       request('http://' + node.ip + ':7777', function (err, response, body) {
@@ -121,6 +138,7 @@ app.get('/refresh', function (req, res) {
           JSON.parse(body).forEach(function(conn) {
             conns.push({
               'node': node._id,
+              'service': node.service_id,
               'timestamp': conn.t,
               'source': conn.s,
               'destination': conn.d
@@ -136,11 +154,11 @@ app.get('/refresh', function (req, res) {
               docs.forEach(function(doc) {
                 conn_ids.push(doc._id);
               });
-              // Attach connection IDs to node
-              Node.update({_id: node._id}, {
+              // Attach connection IDs to instance and service nodes
+              Node.update({$or: [{_id: node._id}, {name: node.service}]}, {
                 connectionDetails: 'OK',
                 connections: conn_ids
-              }).exec(function (err) {
+              }, {"multi": true}).exec(function (err, doc) {
                 if (err) {
                   log.error('[ERR] Failed to save node connection: ' + err);
                 }
@@ -155,10 +173,10 @@ app.get('/refresh', function (req, res) {
   res.redirect('/');
 });
 
-app.get('/nodes', function (req, res) {
+app.get('/bind', function (req, res) {
   Conn.find().exec(function (err, conns) {
     if (err) {
-      log.error('[ERR] Failed to save node connection: ' + err);
+      log.error('[ERR] Failed to get connections: ' + err);
     } else {
       conns.forEach(function (conn) {
         Node.findOne({'private_ip': conn.destination.split(':')[0]}).exec(function (err, node) {
@@ -166,9 +184,16 @@ app.get('/nodes', function (req, res) {
             log.error('[ERR] Failed to get destination node: ' + err);
           }
           if (node) {
+            // Save inter-instance connection
             Node.update({'_id': conn.node}, {$addToSet: {'connects_to': node._id}}).exec(function (err) {
               if (err) {
-                log.error('[ERR] Failed to push connected node: ' + err);
+                log.error('[ERR] Failed to push connected instance node: ' + err);
+              }
+            });
+            // Save inter-service connection
+            Node.update({'_id': conn.service}, {$addToSet: {'connects_to': node.service_id}}).exec(function (err) {
+              if (err) {
+                log.error('[ERR] Failed to push connected service node: ' + err);
               }
             });
           }
@@ -183,7 +208,40 @@ app.get('/nodes', function (req, res) {
 app.get('/graph', function (req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  Node.aggregate([{$match: {}}, {
+  var viz = {
+    serverUpdateTime: Date.now(),
+    connections: [{
+      target: 'us-east-1',
+      metrics: { normal: 50000 },
+      source: 'INTERNET',
+      notices: [],
+      class: 'normal'
+    }],
+    nodes: [{
+      displayName: 'INTERNET',
+      name: 'INTERNET',
+      connections: [],
+      renderer: 'region',
+      nodes: [],
+      class: 'normal',
+      metadata: {},
+      updated: Date.now()
+    }, {
+      displayName: 'us-east-1',
+      name: 'us-east-1',
+      connections: [],
+      renderer: 'region',
+      nodes: [],
+      class: 'normal',
+      metadata: {},
+      updated: Date.now()
+    }],
+    renderer: 'global',
+    name: 'edge'
+  }
+
+  // Append service nodes
+  Node.aggregate([{$match: {type: 'service'}}, {
     $graphLookup: {
       from: 'infranodes', // Use the customers collection
       startWith: '$connects_to', // Start looking at the document's `friends` property
@@ -194,77 +252,94 @@ app.get('/graph', function (req, res) {
     }
   }]).exec(function (err, graph) {
     if (err) {
-      log.error('[ERR] Failed to get destination node: ' + err);
-    }
-
-    var viz = {
-      serverUpdateTime: Date.now(),
-      connections: [{
-        target: 'us-east-1',
-        metrics: { normal: 50000 },
-        source: 'INTERNET',
-        notices: [],
-        class: 'normal'
-      }],
-      nodes: [{
-        displayName: 'INTERNET',
-        name: 'INTERNET',
-        connections: [],
-        renderer: 'region',
-        nodes: [],
-        class: 'normal',
-        metadata: {},
-        updated: Date.now()
-      }, {
-        displayName: 'us-east-1',
-        name: 'us-east-1',
-        connections: [],
-        renderer: 'region',
-        nodes: [],
-        class: 'normal',
-        metadata: {},
-        updated: Date.now()
-      }],
-      renderer: 'global',
-      name: 'edge'
-    }
-
-    graph.forEach(function (node) {
-      // Add us-east-1 nodes
-      viz.nodes[1].nodes.push({
-        displayName: node.name,
-        name: node.name,
-        connections: [],
-        renderer: 'region',
-        props: {},
-        maxVolume: 96035.538,
-        nodes: [],
-        class: 'normal',
-        metadata: {
-          inbound: [],
-          outbound: []
-        },
-        updated: Date.now()
-      });
-      // Add us-east-1 connections
-      node.graph.forEach(function (conn) {
-        viz.nodes[1].connections.push({
-          target: conn.name,
-          metrics: {
-            normal: 50000
-          },
-          source: node.name,
-          notices: [],
+      log.error('[ERR] Failed to get service aggegation: ' + err);
+    } else {
+      graph.forEach(function (node) {
+        // Add us-east-1 nodes
+        viz.nodes[1].nodes.push({
+          displayName: node.name,
+          name: node.name,
+          connections: [],
+          renderer: 'region',
+          props: {},
+          maxVolume: 96035.538,
+          nodes: [],
           class: 'normal',
-          metadata: {
-            streaming: 1
-          }
+          metadata: { inbound: [], outbound: [] },
+          updated: Date.now()
+        });
+        // Add us-east-1 connections
+        node.graph.forEach(function (conn) {
+          viz.nodes[1].connections.push({
+            target: conn.name,
+            metrics: { normal: 50000 },
+            source: node.name,
+            notices: [],
+            class: 'normal',
+            metadata: { streaming: 1 }
+          });
         });
       });
-    });
 
-    res.send(viz);
+      updateInstances(viz);
+    }
   });
+
+  function updateInstances (viz) {
+    // Append instance nodes
+    Node.aggregate([{$match: {type: 'instance'}}, {
+      $graphLookup: {
+        from: 'infranodes', // Use the customers collection
+        startWith: '$connects_to', // Start looking at the document's `friends` property
+        connectFromField: 'connects_to', // A link in the graph is represented by the friends property...
+        connectToField: '_id', // ... pointing to another customer's _id property
+        maxDepth: 1, // Only recurse one level deep
+        as: 'graph' // Store this in the `connections` property
+      }
+    }]).exec(function (err, graph) {
+      if (err) {
+        log.error('[ERR] Failed to get service aggegation: ' + err);
+      } else {
+        graph.forEach(function (node) {
+          // Add us-east-1 nodes
+          viz.nodes[1].nodes.forEach(function(service) {
+            if (service.name == node.service) {
+              service.nodes.push({
+                displayName: node.name,
+                name: node.name,
+                connections: [],
+                renderer: 'region',
+                props: {},
+                maxVolume: 96035.538,
+                nodes: [],
+                class: 'normal',
+                metadata: { inbound: [], outbound: [] },
+                updated: Date.now()
+              });
+            }
+          });
+          // Add us-east-1 connections
+          viz.nodes[1].nodes.forEach(function(service) {
+            if (service.name == node.service) {
+              node.graph.forEach(function (conn) {
+                service.connections.push({
+                  target: conn.name,
+                  metrics: { normal: 50000 },
+                  source: node.name,
+                  notices: [],
+                  class: 'normal',
+                  metadata: { streaming: 1 }
+                });
+              });
+            }
+          });
+        });
+
+        res.send(viz);
+      }
+    });
+  }
+
 });
 
 app.listen(3000, function () {
