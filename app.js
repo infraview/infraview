@@ -11,29 +11,8 @@ var log = require('./logging')();
 mongoose.Promise = require('bluebird');
 mongoose.connect('mongodb://localhost/infraview');
 
-
-var Schema = mongoose.Schema;
-var Node = mongoose.model('InfraNode', new Schema({
-  id: { type: String, required: true },
-  type: { type: String, required: true },
-  name: { type: String },
-  service: { type: String },
-  service_id: { type: Schema.ObjectId },
-  ip: { type: String },
-  private_ip: { type: String },
-  region: { type: String },
-  zone: { type: String },
-  connects_to: { type: [] },
-  connections: { type: [] },
-  connectionDetails: { type: String }
-}));
-var Conn = mongoose.model('InfraConn', new Schema({
-  node: { type: Schema.ObjectId, required: true },
-  service: { type: Schema.ObjectId, required: true },
-  timestamp: { type: String, required: true },
-  source: { type: String, required: true },
-  destination: { type: String, required: true }
-}));
+var Node = require('./models/node');
+var Conn = require('./models/connection');
 
 // Read config
 var config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
