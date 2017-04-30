@@ -87,15 +87,15 @@ app.get('/', function (req, res) {
 });
 
 app.get('/nodes', function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   Node.find().exec(function (err, nodes) {
     res.send(nodes);
   });
 });
 
-app.get('/connections', function (req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  Node.find({$or: [{name: req.query.node}, {service: req.query.node}]}).select({ 'private_ip': 1, 'ip': 1}).exec(function (err, nodes) {
+function getInboundOutboundConnections (node, callback) {
+  Node.find({$or: [{name: node}, {service: node}]}).select({ 'private_ip': 1, 'ip': 1}).exec(function (err, nodes) {
     var all_ips = [];
     nodes.forEach(function(node) {
       all_ips.push(node.ip);
@@ -106,16 +106,71 @@ app.get('/connections', function (req, res) {
       var response = { inbound: [], outbound: [] };
 
       conns.forEach(function(conn) {
-        if (all_ips.indexOf(conn.source) > -1) {
-          response.outbound.push(conn);
-        } else {
-          response.inbound.push(conn);
+        if (all_ips.indexOf(conn.source) > -1 && conn.destination_port < 32768) {
+          // Add connection if it does not already exist
+          var found = false;
+          response.outbound.forEach(function (oconn) {
+            if (oconn.destination == conn.destination && oconn.destination_port == conn.destination_port) {
+              found = true;
+            }
+          });
+          if (!found) {
+            response.outbound.push(conn);
+          }
+        }
+        if (all_ips.indexOf(conn.destination) > -1 && conn.source_port > 32768) {
+          // Add connection if it does not already exist
+          var found = false;
+          response.inbound.forEach(function (iconn) {
+            if (iconn.source == conn.source && iconn.destination_port == conn.destination_port) {
+              found = true;
+            }
+          });
+          if (!found) {
+            response.inbound.push(conn);
+          }
         }
       });
 
-      res.send(response);
+      return callback(response);
     });
   });
+}
+
+app.get('/connections', function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  getInboundOutboundConnections(req.query.node, sendResponse);
+
+  function sendResponse(response) {
+    res.send(response);
+  }
+});
+
+app.get('/sg', function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  //var params = {GroupNames: []};
+  ec2.describeSecurityGroups({}, function (err, data) {
+    if (err) {
+      log.error(err, err.stack);
+    } else {
+      res.send(data.SecurityGroups);
+    }
+  });
+});
+
+app.get('/inbound', function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  getInboundOutboundConnections(req.query.node, sendResponse);
+
+  function sendResponse(response) {
+    var inboundPorts = [];
+
+    response.inbound.forEach(function (conn) {
+      inboundPorts.push(conn.destination_port);
+    });
+
+    res.send(inboundPorts);
+  }
 });
 
 app.get('/refresh', function (req, res) {
