@@ -12,6 +12,7 @@ mongoose.Promise = require('bluebird');
 mongoose.connect('mongodb://localhost/infraview');
 
 var Node = require('./models/node');
+var Alert = require('./models/alert');
 var Conn = require('./models/connection');
 
 // Read config
@@ -146,6 +147,14 @@ app.get('/connections', function (req, res) {
   }
 });
 
+app.get('/alerts', function (req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  Alert.find().populate('affected').exec(function (err, alerts) {
+    res.send(alerts)
+  });
+});
+
 app.get('/sg', function (req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   //var params = {GroupNames: []};
@@ -177,7 +186,7 @@ app.get('/refresh', function (req, res) {
   Node.find({type: 'instance'}).exec(function (err, nodes) {
     nodes.forEach(function (node) {
 
-      request('http://' + node.ip + ':7777', function (err, response, body) {
+      request({uri: 'http://' + node.ip + ':7777', timeout: 30*1000}, function (err, response, body) {
         if (err) {
           // Save connection error message
           Node.update({id: node.id}, {
@@ -187,12 +196,16 @@ app.get('/refresh', function (req, res) {
               log.error('[ERR] Failed to update node connection details: ' + err);
             }
           });
+          // Alert on node down
+          Alert.update({type: 'instance_down'}, {
+            $addToSet: { 'affected': node._id }
+          }).exec(function (err) {
+            if (err) {
+              log.error('[ERR] Failed to add node down alert: ' + err);
+            }
+          });
 
         } else {
-          //log.error('error:', error); // Print the error if one occurred
-          //log.error('statusCode:', response && response.statusCode); // Print the response status code if a response was received
-          //log.error('body:', body); // Print the HTML for the Google homepage.
-
           var conns = [];
           // Build list of new connections for node
           JSON.parse(body).forEach(function(conn) {
@@ -225,6 +238,14 @@ app.get('/refresh', function (req, res) {
                   log.error('[ERR] Failed to save node connection: ' + err);
                 }
               });
+            }
+          });
+          // Remove node down alert if any
+          Alert.update({type: 'instance_down'}, {
+            $pull: { 'affected': node._id }
+          }).exec(function (err) {
+            if (err) {
+              log.error('[ERR] Failed to remove node down alert: ' + err);
             }
           });
         }
