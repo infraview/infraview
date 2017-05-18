@@ -186,7 +186,8 @@ app.get('/refresh', function (req, res) {
   Node.find({type: 'instance'}).exec(function (err, nodes) {
     nodes.forEach(function (node) {
 
-      request({uri: 'http://' + node.ip + ':7777', timeout: 30*1000}, function (err, response, body) {
+      var uri = 'http://' + node.ip + ':' + config.collect_port;
+      request({uri: uri, timeout: config.collect_timeout}, function (err, response, body) {
         if (err) {
           // Save connection error message
           Node.update({id: node.id}, {

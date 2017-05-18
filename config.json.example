@@ -1,4 +1,7 @@
 {
   "aws_key": "XXXXXXXXXXXXX",
   "aws_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+  "collect_timeout": 30000,
+  "collect_port": 7777
 }
