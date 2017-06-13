@@ -39,5 +39,8 @@ module.exports = mongoose.model('Node', new mongoose.Schema({
   },
   'connectionDetails': {
     type: String
+  },
+  'connectionLastRefresh': {
+    type: Date
   }
 }));

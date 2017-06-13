@@ -4,4 +4,12 @@
 
   "collect_timeout": 30000,
   "collect_port": 7777
+
+  "alert_connections_threshold": 2,
+  "alert_aggregation_period": 60000,
+
+  "scan_ignore_last": 2,
+
+  "refresh_resource_interval_ms": 5000,
+  "refresh_aggregations_interval_ms": 10000
 }

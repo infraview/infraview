@@ -24,9 +24,127 @@ aws.config.update({
   region: 'us-east-1'
 });
 
+// Refresh data function
+function refreshResources() {
+   ec2.describeInstances(getInstances);
+   getConnections();
+}
+// Refresh data regularly
+setInterval(refreshResources, config.refresh_resource_interval_ms);
+
+// Refresh metric aggregations function
+function refreshAggregations() {
+   getAggregations();
+}
+// Refresh data regularly
+setInterval(refreshAggregations, config.refresh_aggregations_interval_ms);
 
 var ec2 = new aws.EC2();
-ec2.describeInstances(function (err, data) {
+
+function getConnections() {
+  Node.find({type: 'instance'}).exec(function (err, nodes) {
+    nodes.forEach(function (node) {
+
+      var uri = 'http://' + node.ip + ':' + config.collect_port;
+      request({uri: uri, timeout: config.collect_timeout}, function (err, response, body) {
+        if (err) {
+          // Save connection error message
+          Node.update({id: node.id}, {
+            connectionDetails: err
+          }).exec(function (err) {
+            if (err) {
+              log.error('[ERR] Failed to update node connection details: ' + err);
+            }
+          });
+          // Alert on node down
+          Alert.update({type: 'instance_down'}, {
+            $addToSet: { 'affected': node._id }
+          }).exec(function (err) {
+            if (err) {
+              log.error('[ERR] Failed to add node down alert: ' + err);
+            }
+          });
+
+        } else {
+          var conns = [];
+          body = JSON.parse(body);
+
+          // Get timestamps in timeline
+          var keys = Object.keys(body);
+
+          // Remove last two most recent timestamp and only use the rest
+          keys = keys.sort().slice(0, -config.scan_ignore_last);
+
+          // Go over each timestamp
+          keys.forEach(function(ts) {
+            if (body[ts]) {
+              // Get last timestamp saved in DB
+              if (node.connectionLastRefresh) {
+                var lastSavedTimestamp = parseInt(node.connectionLastRefresh.getTime() / 1000); // convert to seconds
+              }
+              // Create DB object and add to array
+              if ((!node.connectionLastRefresh) || parseInt(ts) > lastSavedTimestamp) {
+                // Build list of new connections for node
+                body[ts].forEach(function(conn) {
+                  conns.push({
+                    'node': node._id,
+                    'service': node.service_id,
+                    'timestamp': conn.t,
+                    'count': conn.c,
+                    'source': conn.s.split(':')[0],
+                    'source_port': conn.s.split(':')[1],
+                    'destination': conn.d.split(':')[0],
+                    'destination_port': conn.d.split(':')[1]
+                  });
+                });
+              }
+            }
+          });
+
+          // Save second most recent timestamp
+          var lastTimestamp = keys.slice(-1);
+
+          if (conns.length != 0) {
+            log.debug('Added ' + conns.length + ' conns for ' + node.name);
+          }
+
+          // Save all new connections at once
+          Conn.insertMany(conns, function(err, docs) {
+            if (err) {
+              log.error('[ERR] Failed to save connections: ' + err);
+            } else {
+              // Save connection IDs
+              var conn_ids = [];
+              docs.forEach(function(doc) {
+                conn_ids.push(doc._id);
+              });
+              // Attach connection IDs to instance and service nodes
+              Node.update({$or: [{_id: node._id}, {name: node.service}]}, {
+                connectionLastRefresh: new Date(lastTimestamp * 1000),
+                connectionDetails: 'OK',
+                connections: conn_ids
+              }, {"multi": true}).exec(function (err, doc) {
+                if (err) {
+                  log.error('[ERR] Failed to save node connection: ' + err);
+                }
+              });
+            }
+          });
+          // Remove node down alert if any
+          Alert.update({type: 'instance_down'}, {
+            $pull: { 'affected': node._id }
+          }).exec(function (err) {
+            if (err) {
+              log.error('[ERR] Failed to remove node down alert: ' + err);
+            }
+          });
+        }
+      });
+    });
+  });
+};
+
+function getInstances (err, data) {
   if (err) {
     log.error(err, err.stack);
   } else {
@@ -80,7 +198,35 @@ ec2.describeInstances(function (err, data) {
       });
     });
   }
-});
+};
+
+function getAggregations() {
+  // Get all connections from 60 seconds ago
+  test_date = Date.now() - config.alert_aggregation_period_ms;
+  Conn.aggregate([{$match: {timestamp: {$gt: test_date.toString()}}}, {
+    $group: {
+      _id: "$node",
+      count: { $sum: "$count" }
+    }
+  }]).exec(function (err, graph) {
+    // Gather alerting nodes
+    var alerting_nodes = [];
+    graph.forEach(function (alerted_host) {
+      if (alerted_host.count > config.alert_connections_threshold) {
+        alerting_nodes.push(alerted_host._id)
+      }
+    });
+
+    // Alert number of collections
+    Alert.update({type: 'connections'}, {
+      $set: { 'affected': alerting_nodes },
+    }, {upsert: true}).exec(function (err) {
+      if (err) {
+        log.error('[ERR] Failed to add connections alert: ' + err);
+      }
+    });
+  });
+}
 
 
 app.get('/', function (req, res) {
@@ -94,6 +240,7 @@ app.get('/nodes', function (req, res) {
     res.send(nodes);
   });
 });
+
 
 function getInboundOutboundConnections (node, callback) {
   Node.find({$or: [{name: node}, {service: node}]}).select({ 'private_ip': 1, 'ip': 1}).exec(function (err, nodes) {
@@ -183,77 +330,7 @@ app.get('/inbound', function (req, res) {
 });
 
 app.get('/refresh', function (req, res) {
-  Node.find({type: 'instance'}).exec(function (err, nodes) {
-    nodes.forEach(function (node) {
-
-      var uri = 'http://' + node.ip + ':' + config.collect_port;
-      request({uri: uri, timeout: config.collect_timeout}, function (err, response, body) {
-        if (err) {
-          // Save connection error message
-          Node.update({id: node.id}, {
-            connectionDetails: err
-          }).exec(function (err) {
-            if (err) {
-              log.error('[ERR] Failed to update node connection details: ' + err);
-            }
-          });
-          // Alert on node down
-          Alert.update({type: 'instance_down'}, {
-            $addToSet: { 'affected': node._id }
-          }).exec(function (err) {
-            if (err) {
-              log.error('[ERR] Failed to add node down alert: ' + err);
-            }
-          });
-
-        } else {
-          var conns = [];
-          // Build list of new connections for node
-          JSON.parse(body).forEach(function(conn) {
-            conns.push({
-              'node': node._id,
-              'service': node.service_id,
-              'timestamp': conn.t,
-              'source': conn.s.split(':')[0],
-              'source_port': conn.s.split(':')[1],
-              'destination': conn.d.split(':')[0],
-              'destination_port': conn.d.split(':')[1]
-            });
-          });
-          // Save all new connections at once
-          Conn.insertMany(conns, function(err, docs) {
-            if (err) {
-              log.error('[ERR] Failed to save connections: ' + err);
-            } else {
-              // Save connection IDs
-              var conn_ids = [];
-              docs.forEach(function(doc) {
-                conn_ids.push(doc._id);
-              });
-              // Attach connection IDs to instance and service nodes
-              Node.update({$or: [{_id: node._id}, {name: node.service}]}, {
-                connectionDetails: 'OK',
-                connections: conn_ids
-              }, {"multi": true}).exec(function (err, doc) {
-                if (err) {
-                  log.error('[ERR] Failed to save node connection: ' + err);
-                }
-              });
-            }
-          });
-          // Remove node down alert if any
-          Alert.update({type: 'instance_down'}, {
-            $pull: { 'affected': node._id }
-          }).exec(function (err) {
-            if (err) {
-              log.error('[ERR] Failed to remove node down alert: ' + err);
-            }
-          });
-        }
-      });
-    });
-  });
-
+  getConnections();
   res.redirect('/');
 });
 
@@ -292,93 +369,123 @@ app.get('/bind', function (req, res) {
 app.get('/graph', function (req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  var viz = {
-    serverUpdateTime: Date.now(),
-    connections: [{
-      target: 'us-east-1',
-      metrics: { normal: 50000 },
-      source: 'INTERNET',
-      notices: [],
-      class: 'normal'
-    }],
-    nodes: [{
-      displayName: 'INTERNET',
-      name: 'INTERNET',
-      connections: [],
-      renderer: 'region',
-      nodes: [],
-      class: 'normal',
-      metadata: {},
-      updated: Date.now()
-    }, {
-      displayName: 'us-east-1',
-      name: 'us-east-1',
-      connections: [],
-      renderer: 'region',
-      nodes: [],
-      class: 'normal',
-      metadata: {},
-      updated: Date.now()
-    }],
-    renderer: 'global',
-    name: 'edge'
-  }
+  var _self = {};
 
-  // Append service nodes
-  Node.aggregate([{$match: {type: 'service'}}, {
-    $graphLookup: {
-      from: 'nodes', // Use the customers collection
-      startWith: '$connects_to', // Start looking at the document's `friends` property
-      connectFromField: 'connects_to', // A link in the graph is represented by the friends property...
-      connectToField: '_id', // ... pointing to another customer's _id property
-      maxDepth: 1, // Only recurse one level deep
-      as: 'graph' // Store this in the `connections` property
-    }
-  }]).exec(function (err, graph) {
+  // Gather alerts
+  Alert.aggregate([{ $unwind : "$affected" }]).exec(function (err, alerts) {
     if (err) {
-      log.error('[ERR] Failed to get service aggegation: ' + err);
-    } else {
-      graph.forEach(function (node) {
-        // Add us-east-1 nodes
-        viz.nodes[1].nodes.push({
-          displayName: node.name,
-          name: node.name,
-          connections: [],
-          renderer: 'region',
-          props: {},
-          maxVolume: 96035.538,
-          nodes: [],
-          class: 'normal',
-          metadata: { inbound: [], outbound: [] },
-          updated: Date.now()
+      log.error('Failed to fetch alerts for graph: ' + err);
+    }
+    // Convert to dict for easy access
+    _self.alerts = {};
+    alerts.forEach(function (alert) {
+      if (!(alert.affected in _self.alerts)) {
+        _self.alerts[alert.affected] = [];
+      }
+      if (alert.type == 'connections') {
+        _self.alerts[alert.affected].push({
+          title: 'Max connections reached'
         });
-        // Add us-east-1 connections
-        node.graph.forEach(function (conn) {
-          viz.nodes[1].connections.push({
-            target: conn.name,
-            metrics: { normal: 50000 },
-            source: node.name,
-            notices: [],
-            class: 'normal',
-            metadata: { streaming: 1 }
+      } else if (alert.type == 'instance_down') {
+        _self.alerts[alert.affected].push({
+          title: 'Node is DOWN'
+        });
+      }
+    });
+
+    buildResponse();
+  });
+
+  function buildResponse() {
+    var viz = {
+      serverUpdateTime: Date.now(),
+      connections: [{
+        target: 'us-east-1',
+        metrics: { normal: 3000 },
+        source: 'INTERNET',
+        notices: [],
+        class: 'normal'
+      }],
+      nodes: [{
+        displayName: 'INTERNET',
+        name: 'INTERNET',
+        connections: [],
+        renderer: 'region',
+        nodes: [],
+        class: 'normal',
+        metadata: {},
+        updated: Date.now()
+      }, {
+        displayName: 'us-east-1',
+        name: 'us-east-1',
+        connections: [],
+        renderer: 'region',
+        nodes: [],
+        class: 'normal',
+        metadata: {},
+        updated: Date.now()
+      }],
+      renderer: 'global',
+      name: 'edge'
+    }
+
+    // Append service nodes
+    Node.aggregate([{$match: {type: 'service'}}, {
+      $graphLookup: {
+        from: 'nodes',                   // Use the nodes collection
+        startWith: '$connects_to',       // Start looking at the document's `connects_to` property
+        connectFromField: 'connects_to', // A link in the graph is represented by the connects_to property...
+        connectToField: '_id',           // ... pointing to another customer's _id property
+        maxDepth: 0,                     // Only recurse zero levels deep
+        as: 'graph'                      // Store this in the `graph` property
+      }
+    }]).exec(function (err, graph) {
+      if (err) {
+        log.error('[ERR] Failed to get service aggegation: ' + err);
+      } else {
+        graph.forEach(function (node) {
+          // Add us-east-1 nodes
+          viz.nodes[1].nodes.push({
+            displayName: node.name,
+            name: node.name,
+            connections: [],
+            renderer: 'region',
+            props: {},
+            maxVolume: 5000,
+            nodes: [],
+            class: (_self.alerts[node._id] && _self.alerts[node._id].length ? 'danger' : 'normal'),
+            metadata: { inbound: [], outbound: [] },
+            updated: Date.now(),
+            notices: _self.alerts[node._id]
+          });
+          // Add us-east-1 connections
+          node.graph.forEach(function (conn) {
+            viz.nodes[1].connections.push({
+              target: conn.name,
+              metrics: { normal: 3000 },
+              source: node.name,
+              notices: [],
+              class: 'normal',
+              metadata: { streaming: 1 }
+            });
           });
         });
-      });
 
-      updateInstances(viz);
-    }
-  });
+        updateInstances(viz);
+      }
+    });
+  }
 
   function updateInstances (viz) {
     // Append instance nodes
     Node.aggregate([{$match: {type: 'instance'}}, {
       $graphLookup: {
-        from: 'nodes', // Use the customers collection
-        startWith: '$connects_to', // Start looking at the document's `friends` property
-        connectFromField: 'connects_to', // A link in the graph is represented by the friends property...
-        connectToField: '_id', // ... pointing to another customer's _id property
-        maxDepth: 1, // Only recurse one level deep
-        as: 'graph' // Store this in the `connections` property
+        from: 'nodes',                   // Use the nodes collection
+        startWith: '$connects_to',       // Start looking at the document's `connects_to` property
+        connectFromField: 'connects_to', // A link in the graph is represented by the connects_to property...
+        connectToField: '_id',           // ... pointing to another customer's _id property
+        maxDepth: 0,                     // Only recurse zero levels deep
+        as: 'graph'                      // Store this in the `graph` property
       }
     }]).exec(function (err, graph) {
       if (err) {
@@ -394,11 +501,12 @@ app.get('/graph', function (req, res) {
                 connections: [],
                 renderer: 'region',
                 props: {},
-                maxVolume: 96035.538,
+                maxVolume: 5000,
                 nodes: [],
-                class: 'normal',
+                class: (_self.alerts[node._id] && _self.alerts[node._id].length ? 'danger' : 'normal'),
                 metadata: { inbound: [], outbound: [] },
-                updated: Date.now()
+                updated: Date.now(),
+                notices: _self.alerts[node._id]
               });
             }
           });
@@ -408,7 +516,7 @@ app.get('/graph', function (req, res) {
               node.graph.forEach(function (conn) {
                 service.connections.push({
                   target: conn.name,
-                  metrics: { normal: 50000 },
+                  metrics: { normal: 3000 },
                   source: node.name,
                   notices: [],
                   class: 'normal',

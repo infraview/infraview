@@ -14,6 +14,10 @@ module.exports = mongoose.model('Connection', new mongoose.Schema({
     type: String,
     required: true
   },
+  'count': {
+    type: Number,
+    required: true
+  },
   'source': {
     type: String,
     required: true

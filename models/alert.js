@@ -12,5 +12,9 @@ module.exports = mongoose.model('Alert', new mongoose.Schema({
       ref: 'Node'
     }],
     required: true
-  }
+  },
+  'threshold': {
+    type: Number,
+    required: false
+  },
 }));
