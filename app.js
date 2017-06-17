@@ -53,7 +53,7 @@ function getConnections() {
             connectionDetails: err
           }).exec(function (err) {
             if (err) {
-              log.error('[ERR] Failed to update node connection details: ' + err);
+              log.error('Failed to update node connection details: ' + err);
             }
           });
           // Alert on node down
@@ -61,7 +61,7 @@ function getConnections() {
             $addToSet: { 'affected': node._id }
           }).exec(function (err) {
             if (err) {
-              log.error('[ERR] Failed to add node down alert: ' + err);
+              log.error('Failed to add node down alert: ' + err);
             }
           });
 
@@ -111,7 +111,7 @@ function getConnections() {
           // Save all new connections at once
           Conn.insertMany(conns, function(err, docs) {
             if (err) {
-              log.error('[ERR] Failed to save connections: ' + err);
+              log.error('Failed to save connections: ' + err);
             } else {
               // Save connection IDs
               var conn_ids = [];
@@ -125,7 +125,7 @@ function getConnections() {
                 connections: conn_ids
               }, {"multi": true}).exec(function (err, doc) {
                 if (err) {
-                  log.error('[ERR] Failed to save node connection: ' + err);
+                  log.error('Failed to save node connection: ' + err);
                 }
               });
             }
@@ -135,7 +135,7 @@ function getConnections() {
             $pull: { 'affected': node._id }
           }).exec(function (err) {
             if (err) {
-              log.error('[ERR] Failed to remove node down alert: ' + err);
+              log.error('Failed to remove node down alert: ' + err);
             }
           });
         }
@@ -173,7 +173,7 @@ function getInstances (err, data) {
             type: 'service',
           }, {upsert: true, new: true}, function (err, service) {
             if (err) {
-              log.error('[ERR] Failed to add service node: ' + err)
+              log.error('Failed to add service node: ' + err)
             } else {
               // Create or update instance node
               Node.update({id: ins.InstanceId}, {
@@ -188,7 +188,7 @@ function getInstances (err, data) {
                 zone: AvailabilityZone
               }, {upsert: true}).exec(function (err) {
                 if (err) {
-                  log.error('[ERR] Failed to add instance node: ' + err)
+                  log.error('Failed to add instance node: ' + err)
                 }
               });
 
@@ -222,7 +222,7 @@ function getAggregations() {
       $set: { 'affected': alerting_nodes },
     }, {upsert: true}).exec(function (err) {
       if (err) {
-        log.error('[ERR] Failed to add connections alert: ' + err);
+        log.error('Failed to add connections alert: ' + err);
       }
     });
   });
@@ -337,24 +337,24 @@ app.get('/refresh', function (req, res) {
 app.get('/bind', function (req, res) {
   Conn.find().exec(function (err, conns) {
     if (err) {
-      log.error('[ERR] Failed to get connections: ' + err);
+      log.error('Failed to get connections: ' + err);
     } else {
       conns.forEach(function (conn) {
         Node.findOne({'private_ip': conn.destination}).exec(function (err, node) {
           if (err) {
-            log.error('[ERR] Failed to get destination node: ' + err);
+            log.error('Failed to get destination node: ' + err);
           }
           if (node) {
             // Save inter-instance connection
             Node.update({'_id': conn.node}, {$addToSet: {'connects_to': node._id}}).exec(function (err) {
               if (err) {
-                log.error('[ERR] Failed to push connected instance node: ' + err);
+                log.error('Failed to push connected instance node: ' + err);
               }
             });
             // Save inter-service connection
             Node.update({'_id': conn.service}, {$addToSet: {'connects_to': node.service_id}}).exec(function (err) {
               if (err) {
-                log.error('[ERR] Failed to push connected service node: ' + err);
+                log.error('Failed to push connected service node: ' + err);
               }
             });
           }
@@ -389,6 +389,10 @@ app.get('/graph', function (req, res) {
       } else if (alert.type == 'instance_down') {
         _self.alerts[alert.affected].push({
           title: 'Node is DOWN'
+        });
+      } else if (alert.type == 'high_cpu_usage') {
+        _self.alerts[alert.affected].push({
+          title: 'High CPU Usage'
         });
       }
     });
@@ -441,10 +445,10 @@ app.get('/graph', function (req, res) {
       }
     }]).exec(function (err, graph) {
       if (err) {
-        log.error('[ERR] Failed to get service aggegation: ' + err);
+        log.error('Failed to get service aggegation: ' + err);
       } else {
         graph.forEach(function (node) {
-          // Add us-east-1 nodes
+          // Add service nodes
           viz.nodes[1].nodes.push({
             displayName: node.name,
             name: node.name,
@@ -453,12 +457,12 @@ app.get('/graph', function (req, res) {
             props: {},
             maxVolume: 5000,
             nodes: [],
-            class: (_self.alerts[node._id] && _self.alerts[node._id].length ? 'danger' : 'normal'),
+            class: 'normal',
             metadata: { inbound: [], outbound: [] },
             updated: Date.now(),
-            notices: _self.alerts[node._id]
+            notices: []
           });
-          // Add us-east-1 connections
+          // Add service connections
           node.graph.forEach(function (conn) {
             viz.nodes[1].connections.push({
               target: conn.name,
@@ -489,10 +493,10 @@ app.get('/graph', function (req, res) {
       }
     }]).exec(function (err, graph) {
       if (err) {
-        log.error('[ERR] Failed to get service aggegation: ' + err);
+        log.error('Failed to get service aggegation: ' + err);
       } else {
         graph.forEach(function (node) {
-          // Add us-east-1 nodes
+          // Add instance nodes
           viz.nodes[1].nodes.forEach(function(service) {
             if (service.name == node.service) {
               service.nodes.push({
@@ -508,9 +512,13 @@ app.get('/graph', function (req, res) {
                 updated: Date.now(),
                 notices: _self.alerts[node._id]
               });
+
+              // Add instance alert for corresponding service
+              service.class = (_self.alerts[node._id] && _self.alerts[node._id].length ? 'danger' : 'normal')
+              service.notices = _self.alerts[node._id]
             }
           });
-          // Add us-east-1 connections
+          // Add instance connections
           viz.nodes[1].nodes.forEach(function(service) {
             if (service.name == node.service) {
               node.graph.forEach(function (conn) {
@@ -533,6 +541,55 @@ app.get('/graph', function (req, res) {
   }
 
 });
+
+app.post('/receive', function(req,res) {
+  var _self = {};
+  var bodyarr = [];
+
+  req.on('data', function(chunk){
+    bodyarr.push(chunk);
+  })
+  req.on('end', function(){
+    _self.msg = JSON.parse(bodyarr.join(''));
+    _self.alert = JSON.parse(_self.msg.Message);
+
+    // Get alerted instance IDs
+    var allIDs = [];
+    _self.alert.Trigger.Dimensions.forEach(function(entry) {
+      allIDs.push(entry.value);
+    });
+
+    // Determine NodeIDs from InstanceCD
+    Node.find({id: {$in: allIDs}}).exec(gotInstanceIDs);
+  });
+
+  function gotInstanceIDs(err, nodes) {
+    // Save NodeIDs separately
+    var nodeIDs = [];
+    nodes.forEach(function(node) {
+      nodeIDs.push(node._id);
+    });
+
+    // Build update
+    var update = {};
+    if (_self.alert.NewStateValue === 'ALARM') {
+      update = { $addToSet: { 'affected': { $each: nodeIDs }}};
+    } else if (_self.alert.NewStateValue === 'OK'){
+      update = { $pull: { 'affected': { $each: nodeIDs }}};
+    } else {
+      log.warn('Got unexpected message: ' + _self.alert);
+    }
+
+
+    // Add or remove CloudWatch ALert
+    Alert.update({type: _self.alert.AlarmName}, update, {upsert: true}).exec(function (err, update) {
+      if (err) {
+        log.error('Failed to update CW alert: ' + err);
+      }
+    });
+  }
+});
+
 
 app.listen(3000, function () {
   log.info('Infraview backend listening on port 3000: http://localhost:3000');
