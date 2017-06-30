@@ -28,6 +28,7 @@ aws.config.update({
 function refreshResources() {
    ec2.describeInstances(getInstances);
    getConnections();
+   bindConnections();
 }
 // Refresh data regularly
 setInterval(refreshResources, config.refresh_resource_interval_ms);
@@ -242,9 +243,11 @@ app.get('/nodes', function (req, res) {
 });
 
 
-function getInboundOutboundConnections (node, callback) {
-  Node.find({$or: [{name: node}, {service: node}]}).select({ 'private_ip': 1, 'ip': 1}).exec(function (err, nodes) {
+function getInboundOutboundConnections (IDs, callback) {
+  var query = {$or: [{id: {$in: IDs}}, {service: {$in: IDs}}, {name: {$in: IDs}}]};
+  Node.find(query).select({ 'private_ip': 1, 'ip': 1}).exec(function (err, nodes) {
     var all_ips = [];
+
     nodes.forEach(function(node) {
       all_ips.push(node.ip);
       all_ips.push(node.private_ip);
@@ -285,9 +288,40 @@ function getInboundOutboundConnections (node, callback) {
   });
 }
 
+
+function bindConnections() {
+  Conn.find().exec(function (err, conns) {
+    if (err) {
+      log.error('Failed to get connections: ' + err);
+    } else {
+      conns.forEach(function (conn) {
+        Node.findOne({'private_ip': conn.destination}).exec(function (err, node) {
+          if (err) {
+            log.error('Failed to get destination node: ' + err);
+          }
+          if (node) {
+            // Save inter-instance connection
+            Node.update({'_id': conn.node}, {$addToSet: {'connects_to': node._id}}).exec(function (err) {
+              if (err) {
+                log.error('Failed to push connected instance node: ' + err);
+              }
+            });
+            // Save inter-service connection
+            Node.update({'_id': conn.service}, {$addToSet: {'connects_to': node.service_id}}).exec(function (err) {
+              if (err) {
+                log.error('Failed to push connected service node: ' + err);
+              }
+            });
+          }
+        });
+      });
+    }
+  });
+}
+
 app.get('/connections', function (req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  getInboundOutboundConnections(req.query.node, sendResponse);
+  getInboundOutboundConnections([req.query.node], sendResponse);
 
   function sendResponse(response) {
     res.send(response);
@@ -316,13 +350,28 @@ app.get('/sg', function (req, res) {
 
 app.get('/inbound', function (req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  getInboundOutboundConnections(req.query.node, sendResponse);
+
+  var instanceIDs = [];
+  var params = { Filters: [{ Name: 'network-interface.group-id', Values: [req.query.sgID] }]};
+
+  ec2.describeInstances(params, function(err, res) {
+    res.Reservations.forEach(function(reservation) {
+      // Gather instances
+      reservation.Instances.forEach(function(instance) {
+        instanceIDs.push(instance.InstanceId);
+      })
+    });
+    // Get ports
+    getInboundOutboundConnections(instanceIDs, sendResponse);
+  });
 
   function sendResponse(response) {
     var inboundPorts = [];
 
     response.inbound.forEach(function (conn) {
-      inboundPorts.push(conn.destination_port);
+      if (inboundPorts.indexOf(conn.destination_port) < 0) {
+        inboundPorts.push(conn.destination_port);
+      }
     });
 
     res.send(inboundPorts);
@@ -335,34 +384,7 @@ app.get('/refresh', function (req, res) {
 });
 
 app.get('/bind', function (req, res) {
-  Conn.find().exec(function (err, conns) {
-    if (err) {
-      log.error('Failed to get connections: ' + err);
-    } else {
-      conns.forEach(function (conn) {
-        Node.findOne({'private_ip': conn.destination}).exec(function (err, node) {
-          if (err) {
-            log.error('Failed to get destination node: ' + err);
-          }
-          if (node) {
-            // Save inter-instance connection
-            Node.update({'_id': conn.node}, {$addToSet: {'connects_to': node._id}}).exec(function (err) {
-              if (err) {
-                log.error('Failed to push connected instance node: ' + err);
-              }
-            });
-            // Save inter-service connection
-            Node.update({'_id': conn.service}, {$addToSet: {'connects_to': node.service_id}}).exec(function (err) {
-              if (err) {
-                log.error('Failed to push connected service node: ' + err);
-              }
-            });
-          }
-        });
-      });
-    }
-  });
-
+  bindConnections();
   res.redirect('/');
 });
 
