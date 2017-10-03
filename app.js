@@ -26,9 +26,14 @@ aws.config.update({
 
 // Refresh data function
 function refreshResources() {
-   ec2.describeInstances(getInstances);
-   getConnections();
-   bindConnections();
+  if (config.nodes) {
+    getStaticInstances();
+  } else {
+    ec2.describeInstances(getInstances);
+  }
+
+  getConnections();
+  bindConnections();
 }
 // Refresh data regularly
 setInterval(refreshResources, config.refresh_resource_interval_ms);
@@ -144,6 +149,38 @@ function getConnections() {
     });
   });
 };
+
+function getStaticInstances (err, data) {
+  config.nodes.forEach(function(ins) {
+    // Create or update service node
+    Node.findOneAndUpdate({id: ins.service}, {
+      id: ins.service,
+      name: ins.service,
+      type: 'service',
+    }, {upsert: true, new: true}, function (err, service) {
+      if (err) {
+        log.error('Failed to add service node: ' + err)
+      } else {
+        // Create or update static instance node
+        Node.update({id: ins.id}, {
+          id: ins.id,
+          name: ins.name,
+          type: ins.type,
+          service: ins.service,
+          service_id: service._id,
+          ip: ins.ip,
+          private_ip: ins.private_ip,
+          region: ins.region,
+          zone: ins.zone
+        }, {upsert: true}).exec(function (err) {
+          if (err) {
+            log.error('Failed to add static instance node: ' + err)
+          }
+        });
+      }
+    });
+  })
+}
 
 function getInstances (err, data) {
   if (err) {
@@ -614,5 +651,5 @@ app.post('/receive', function(req,res) {
 
 
 app.listen(3000, function () {
-  log.info('Infraview backend listening on port 3000: http://localhost:3000');
+  log.info('Infraview backend listening on http://localhost:3000');
 });
