@@ -1,9 +1,9 @@
 {
   "aws_key": "XXXXXXXXXXXXX",
-  "aws_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  "aws_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
 
   "collect_timeout": 30000,
-  "collect_port": 7777
+  "collect_port": 7777,
 
   "alert_connections_threshold": 2,
   "alert_aggregation_period": 60000,
