@@ -20,7 +20,7 @@ module.exports = function (){
     },
     transports: [
       new (winston.transports.Console)({
-        level: 'debug',
+        level: 'info',
         colorize: true,
         timestamp: function() {
           var d = new Date()

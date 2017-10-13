@@ -18,7 +18,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mariuscoto/infraview.git"
+    "url": "git+https://github.com/infraview/infraview.git"
   },
   "keywords": [
     "infrastructure",
@@ -28,7 +28,7 @@
   "author": "Marius Cotofana (marius.coto@gmail.com)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/mariuscoto/infraview/issues"
+    "url": "https://github.com/infraview/infraview/issues"
   },
-  "homepage": "https://github.com/mariuscoto/infraview#readme"
+  "homepage": "https://github.com/infraview/infraview#readme"
 }
