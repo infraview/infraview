@@ -7,7 +7,7 @@
     "aws-sdk": "^2.40.0",
     "bluebird": "^3.5.0",
     "express": "^4.15.2",
-    "mongoose": "^4.9.3",
+    "mongoose": "^4.13.0",
     "request": "^2.81.0",
     "winston": "^2.3.1"
   },

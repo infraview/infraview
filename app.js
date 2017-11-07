@@ -9,11 +9,12 @@ var log = require('./logging')();
 
 
 mongoose.Promise = require('bluebird');
-mongoose.connect('mongodb://localhost/infraview');
+mongoose.connect('mongodb://localhost/infraview', {useMongoClient: true});
 
 var Node = require('./models/node');
 var Alert = require('./models/alert');
 var Conn = require('./models/connection');
+var View = require('./models/view');
 
 // Read config
 var config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
@@ -601,7 +602,7 @@ app.get('/graph', function (req, res) {
 
 });
 
-app.post('/receive', function(req,res) {
+app.post('/receive', function(req, res) {
   var _self = {};
   var bodyarr = [];
 
@@ -647,6 +648,43 @@ app.post('/receive', function(req,res) {
       }
     });
   }
+});
+
+app.get('/view', function(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", '*');
+
+  View.findOne({name: 'dash'}).exec(function (err, doc) {
+    if (err) {
+      log.error('Failed to save view: ' + err);
+    }
+    res.send(doc);
+  });
+
+});
+
+app.post('/view', function(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", '*');
+
+  var _self = {};
+  var bodyarr = [];
+
+  req.on('data', function(chunk){
+    bodyarr.push(chunk);
+  })
+  req.on('end', function(){
+    _self.msg = JSON.parse(bodyarr.join(''));
+
+    View.update({name: 'dash'}, {
+      lastSaveTime: Date.now(),
+      name: 'dash',
+      body: JSON.stringify(_self.msg)
+    }, {upsert: true, strict: false}).exec(function (err, doc) {
+      if (err) {
+        log.error('Failed to save view: ' + err);
+      }
+    });
+  });
+
 });
 
 
