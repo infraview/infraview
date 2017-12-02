@@ -2,6 +2,8 @@
   "aws_key": "XXXXXXXXXXXXX",
   "aws_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
 
+  "aws_instance_name_filter": "*",
+
   "collect_timeout": 30000,
   "collect_port": 7777,
 

@@ -30,7 +30,13 @@ function refreshResources() {
   if (config.nodes) {
     getStaticInstances();
   } else {
-    ec2.describeInstances(getInstances);
+    var params = {
+      Filters: [{
+        Name: 'tag:Name',
+        Values: [config.aws_instance_name_filter]
+      }]
+    };
+    ec2.describeInstances(params, getInstances);
   }
 
   getConnections();
@@ -465,7 +471,7 @@ app.get('/graph', function (req, res) {
       serverUpdateTime: Date.now(),
       connections: [{
         target: 'us-east-1',
-        metrics: { normal: 3000 },
+        metrics: { normal: 1000 },
         source: 'INTERNET',
         notices: [],
         class: 'normal'
@@ -515,7 +521,7 @@ app.get('/graph', function (req, res) {
             connections: [],
             renderer: 'region',
             props: {},
-            maxVolume: 5000,
+            maxVolume: 3000,
             nodes: [],
             class: 'normal',
             metadata: { inbound: [], outbound: [] },
@@ -526,7 +532,7 @@ app.get('/graph', function (req, res) {
           node.graph.forEach(function (conn) {
             viz.nodes[1].connections.push({
               target: conn.name,
-              metrics: { normal: 3000 },
+              metrics: { normal: 1000 },
               source: node.name,
               notices: [],
               class: 'normal',
@@ -565,7 +571,7 @@ app.get('/graph', function (req, res) {
                 connections: [],
                 renderer: 'region',
                 props: {},
-                maxVolume: 5000,
+                maxVolume: 3000,
                 nodes: [],
                 class: (_self.alerts[node._id] && _self.alerts[node._id].length ? 'danger' : 'normal'),
                 metadata: { inbound: [], outbound: [] },
@@ -584,7 +590,7 @@ app.get('/graph', function (req, res) {
               node.graph.forEach(function (conn) {
                 service.connections.push({
                   target: conn.name,
-                  metrics: { normal: 3000 },
+                  metrics: { normal: 1000 },
                   source: node.name,
                   notices: [],
                   class: 'normal',
@@ -688,6 +694,6 @@ app.post('/view', function(req, res) {
 });
 
 
-app.listen(3000, function () {
-  log.info('Infraview backend listening on http://localhost:3000');
+app.listen(2000, function () {
+  log.info('Infraview backend listening on http://localhost:2000');
 });
