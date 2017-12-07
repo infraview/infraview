@@ -2,6 +2,8 @@
   "aws_key": "XXXXXXXXXXXXX",
   "aws_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
 
+  "mongo_url": "localhost:27017",
+
   "aws_instance_name_filter": "*",
 
   "collect_timeout": 30000,

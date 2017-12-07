@@ -8,16 +8,16 @@ var app = express();
 var log = require('./logging')();
 
 
+// Read config
+var config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+
 mongoose.Promise = require('bluebird');
-mongoose.connect('mongodb://localhost/infraview', {useMongoClient: true});
+mongoose.connect('mongodb://' + config.mongo_url + '/infraview', {useMongoClient: true});
 
 var Node = require('./models/node');
 var Alert = require('./models/alert');
 var Conn = require('./models/connection');
 var View = require('./models/view');
-
-// Read config
-var config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
 
 aws.config.update({
   accessKeyId: config.aws_key,
