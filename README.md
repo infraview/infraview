@@ -34,3 +34,11 @@ docker build .
 ```
 docker run -p 2000:2000 -d IMAGE_ID
 ```
+
+
+## Run it with docker-compose
+
+This will start both the app and database.
+```
+docker-compose up
+```
